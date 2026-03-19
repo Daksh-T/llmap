@@ -1,0 +1,10 @@
+{
+  "name": "llmap",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bunx --bun vercel dev",
+    "deploy": "bunx --bun vercel",
+    "deploy:prod": "bunx --bun vercel --prod"
+  }
+}
