@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,900;1,400;1,600&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
     <link
@@ -19,90 +19,113 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="paper-grain"></div>
-    <main class="shell">
-      <section class="hero">
-        <p class="eyebrow">Live atlas from the Locating Slavery's Legacies Hub</p>
-        <div class="hero-grid">
-          <div class="hero-copy">
-            <h1>Memorials, mapped as a living archival field guide.</h1>
-            <p class="lede">
-              This page pulls real memorial records from the Locating Legacies project API,
-              then re-stages them as an editorial atlas: dense, textured, and meant for
-              exploration rather than sterile browsing.
-            </p>
-          </div>
-          <aside class="hero-card">
-            <p class="hero-card-label">Current pull</p>
-            <div class="metric-row">
-              <div>
-                <span class="metric-value" id="mapped-count">...</span>
-                <span class="metric-label">mapped memorials</span>
-              </div>
-              <div>
-                <span class="metric-value" id="institution-count">...</span>
-                <span class="metric-label">institutions</span>
-              </div>
-            </div>
-            <p class="hero-card-note" id="fetched-at">Fetching live data...</p>
-          </aside>
-        </div>
-      </section>
+    <div class="grain"></div>
 
-      <section class="atlas-layout">
-        <div class="map-panel">
-          <div class="map-toolbar">
-            <div>
-              <p class="panel-label">Field filter</p>
-              <input
-                id="search-input"
-                class="search-input"
-                type="search"
-                placeholder="Search titles, people, places, institutions..."
-              />
-            </div>
-            <div>
-              <p class="panel-label">Type</p>
-              <select id="type-filter" class="type-filter">
-                <option value="all">All memorial types</option>
-              </select>
-            </div>
+    <div class="app">
+
+      <!-- ── Topbar ─────────────────────────────────────── -->
+      <header class="topbar">
+        <div class="topbar-brand">
+          <div class="brand-pip"></div>
+          <div>
+            <span class="brand-title">Locating Legacies Atlas</span>
+            <span class="brand-sub">
+              An interface over
+              <a href="https://locatinglegacies.org" target="_blank" rel="noreferrer" class="brand-link">locatinglegacies.org</a>
+            </span>
           </div>
-          <div id="map" class="map-frame" aria-label="Map of memorial records"></div>
         </div>
 
-        <aside class="sidebar">
-          <section class="sidebar-card sidebar-feature">
-            <p class="panel-label">Selected record</p>
-            <div id="feature-card" class="feature-card">
-              <p class="empty-state">Choose a marker or list entry to inspect a memorial.</p>
-            </div>
-          </section>
+        <div class="topbar-controls">
+          <label class="search-wrap">
+            <svg class="search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.5" cy="6.5" r="4.5"/><path d="M10 10l3.5 3.5" stroke-linecap="round"/></svg>
+            <input id="search-input" class="topbar-input" type="search" placeholder="Search memorials, places, people&hellip;" autocomplete="off" />
+          </label>
+          <select id="type-filter" class="topbar-select">
+            <option value="all">All types</option>
+          </select>
+        </div>
 
-          <section class="sidebar-card">
-            <div class="sidebar-heading">
-              <p class="panel-label">Type snapshot</p>
-              <span class="small-note">Live aggregation</span>
-            </div>
-            <div id="type-pills" class="type-pills"></div>
-          </section>
+        <div class="topbar-stats">
+          <button class="stat-btn" id="mapped-btn" title="Browse all memorials">
+            <span class="stat-val" id="mapped-count">&mdash;</span>
+            <span class="stat-key">mapped</span>
+          </button>
+          <div class="stat-rule"></div>
+          <button class="stat-btn" id="inst-btn" title="Browse institutions">
+            <span class="stat-val" id="institution-count">&mdash;</span>
+            <span class="stat-key">institutions</span>
+          </button>
+          <span class="stat-time" id="fetched-at">Fetching&hellip;</span>
+        </div>
+      </header>
 
-          <section class="sidebar-card">
-            <div class="sidebar-heading">
-              <p class="panel-label">Records in view</p>
-              <span class="small-note" id="results-note">0 entries</span>
+      <!-- ── Workspace ──────────────────────────────────── -->
+      <div class="workspace">
+
+        <!-- LEFT: Ledger index -->
+        <nav class="ledger" aria-label="Memorial index">
+          <div class="ledger-cap">
+            <span class="ledger-heading">Index</span>
+            <span class="ledger-count" id="results-note">&hellip;</span>
+          </div>
+          <div id="results-list" class="ledger-scroll"></div>
+        </nav>
+
+        <!-- CENTER: Map -->
+        <main class="cartograph">
+          <div id="map" class="map-canvas" aria-label="Interactive map of memorial records"></div>
+        </main>
+
+        <!-- RIGHT: Dossier (resizable, record only) -->
+        <aside class="dossier" id="dossier">
+          <div class="dossier-handle" id="dossier-handle" title="Drag to resize"></div>
+          <div class="dossier-scroll">
+            <div id="feature-card" class="record-view">
+              <div class="record-empty">
+                <span class="record-empty-glyph">&#9670;</span>
+                <p>Select a memorial to examine its archival record.</p>
+              </div>
             </div>
-            <div id="results-list" class="results-list"></div>
-          </section>
+          </div>
         </aside>
-      </section>
-    </main>
 
-    <script
-      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-      crossorigin=""
-    ></script>
+      </div>
+    </div>
+
+    <!-- ── Full-page artifact catalog ───────────────────── -->
+    <div id="catalog" class="catalog" role="dialog" aria-label="All memorials" hidden>
+      <header class="catalog-head">
+        <div class="catalog-brand">
+          <h2 class="catalog-title">All Mapped Memorials</h2>
+          <span class="catalog-count" id="catalog-count"></span>
+        </div>
+        <label class="catalog-search-wrap">
+          <svg class="search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.5" cy="6.5" r="4.5"/><path d="M10 10l3.5 3.5" stroke-linecap="round"/></svg>
+          <input id="catalog-search" class="catalog-search" type="search" placeholder="Search all memorials&hellip;" autocomplete="off" />
+        </label>
+        <button class="catalog-close" id="catalog-close">&larr; Back to atlas</button>
+      </header>
+      <div id="catalog-grid" class="catalog-grid"></div>
+    </div>
+
+    <!-- ── Institutions slide-over ──────────────────────── -->
+    <div id="inst-modal" class="overlay" role="dialog" aria-label="Institutions" hidden>
+      <div class="overlay-backdrop" id="inst-backdrop"></div>
+      <div class="overlay-panel">
+        <div class="overlay-head">
+          <h2 class="overlay-title">Institutions</h2>
+          <p class="overlay-sub">Click to filter the atlas &middot; &nearr; opens Locating&nbsp;Legacies</p>
+          <button class="overlay-close" id="inst-close">&times;</button>
+        </div>
+        <div class="overlay-search-wrap">
+          <input id="inst-search" class="overlay-search" type="search" placeholder="Filter institutions&hellip;" autocomplete="off" />
+        </div>
+        <div id="inst-list" class="inst-list"></div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script src="/app.js" type="module"></script>
   </body>
-  </html>
+</html>

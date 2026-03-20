@@ -29,11 +29,10 @@ function getDisplayValues(values?: any[]): string[] {
     .filter((value): value is string => Boolean(value));
 }
 
-function trimDescription(text: string | null, limit = 220): string | null {
+function normalizeText(text: string | null): string | null {
   if (!text) return null;
   const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length <= limit) return normalized;
-  return `${normalized.slice(0, limit).trimEnd()}...`;
+  return normalized || null;
 }
 
 function buildUrl(page: number, perPage: number) {
@@ -95,10 +94,14 @@ async function fetchLegaciesData() {
       }
 
       const title = item["o:title"] ?? "Untitled memorial";
-      const description = trimDescription(getDisplayValue(item["dcterms:description"]));
-      const type = getDisplayValue(item["dcterms:type"]);
-      const scope = getDisplayValue(item["dcterms:extent"]);
-      const temporal = getDisplayValue(item["dcterms:temporal"]);
+      const description = normalizeText(getDisplayValue(item["dcterms:description"]));
+      const classification = getDisplayValue(item["dcterms:identifier"]);
+      const types = getDisplayValues(item["dcterms:type"]);
+      const contexts = getDisplayValues(item["dcterms:extent"]);
+      const periods = getDisplayValues(item["dcterms:temporal"]);
+      const type = types[0] ?? null;
+      const scope = contexts[0] ?? null;
+      const temporal = periods[0] ?? null;
       const spatial = getDisplayValue(item["dcterms:spatial"]);
       const place = getDisplayValue(item["bio:place"]);
       const people = getDisplayValues(item["bio:agent"]);
@@ -110,8 +113,12 @@ async function fetchLegaciesData() {
         description,
         lat,
         lng,
+        classification,
+        types,
         type,
+        contexts,
         scope,
+        periods,
         temporal,
         spatial,
         place,
@@ -133,8 +140,10 @@ async function fetchLegaciesData() {
 
   const types = new Map<string, number>();
   for (const item of normalized) {
-    const key = item.type ?? "Unclassified";
-    types.set(key, (types.get(key) ?? 0) + 1);
+    const labels = item.types?.length ? item.types : [item.type ?? "Unclassified"];
+    for (const label of labels) {
+      types.set(label, (types.get(label) ?? 0) + 1);
+    }
   }
 
   return {

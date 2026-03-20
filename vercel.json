@@ -2,6 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "bunVersion": "1.x",
   "cleanUrls": true,
+  "devCommand": null,
   "functions": {
     "api/legacies.ts": {
       "maxDuration": 60
