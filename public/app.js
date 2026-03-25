@@ -5,21 +5,54 @@
 const map = L.map("map", { zoomControl: false, minZoom: 3, preferCanvas: true })
   .setView([37.8, -96], 4);
 
+const basePane = map.createPane("basemap-base");
+basePane.classList.add("map-base-pane");
+basePane.style.zIndex = "200";
+
+const labelsPane = map.createPane("basemap-labels");
+labelsPane.classList.add("map-labels-pane");
+labelsPane.style.zIndex = "240";
+
 L.control.zoom({ position: "topright" }).addTo(map);
 
-L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-  attribution:
-    '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>' +
-    ' &copy; <a href="https://carto.com/attributions">CARTO</a>',
-  subdomains: "abcd",
-  maxZoom: 19,
-}).addTo(map);
+const TILE_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>' +
+  ' &copy; <a href="https://carto.com/attributions">CARTO</a>';
+
+const BASEMAPS = {
+  dark: {
+    base: {
+      url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png",
+      options: { attribution: TILE_ATTRIBUTION, subdomains: "abcd", maxZoom: 19, pane: "basemap-base" },
+    },
+    labels: {
+      url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png",
+      options: { attribution: "", subdomains: "abcd", maxZoom: 19, pane: "basemap-labels" },
+    },
+  },
+  light: {
+    base: {
+      url: "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+      options: { attribution: TILE_ATTRIBUTION, subdomains: "abcd", maxZoom: 19, pane: "basemap-base" },
+    },
+    labels: {
+      url: "https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",
+      options: { attribution: "", subdomains: "abcd", maxZoom: 19, pane: "basemap-labels" },
+    },
+  },
+};
+
+let baseLayer = null;
+let labelsLayer = null;
 
 const layerGroup = L.layerGroup().addTo(map);
 
 /* ── State ────────────────────────────────────────────── */
 
 const state = { records: [], filtered: [], selectedId: null, markers: new Map(), markerGroups: [] };
+
+const THEMES = ["dark", "light"];
+const THEME_STORAGE_KEY = "llmap-theme";
 
 /* ── Element refs ─────────────────────────────────────── */
 
@@ -34,6 +67,8 @@ const el = {
   resultsNote: $("results-note"),
   searchInput: $("search-input"),
   typeFilter: $("type-filter"),
+  themeDarkBtn: $("theme-dark-btn"),
+  themeLightBtn: $("theme-light-btn"),
   // Modals
   instModal: $("inst-modal"), instList: $("inst-list"),
   instSearch: $("inst-search"), instClose: $("inst-close"), instBackdrop: $("inst-backdrop"),
@@ -77,6 +112,55 @@ function fmtDate(v) {
 function isTypingTarget(target) {
   if (!(target instanceof HTMLElement)) return false;
   return target.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(target.tagName);
+}
+
+function readStoredTheme() {
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredTheme(theme) {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {}
+}
+
+function syncThemeButtons(theme) {
+  [el.themeDarkBtn, el.themeLightBtn].forEach((button) => {
+    if (!button) return;
+    const active = button.dataset.themeValue === theme;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function mountBaseLayer(theme) {
+  const config = BASEMAPS[theme] || BASEMAPS.dark;
+  if (baseLayer) map.removeLayer(baseLayer);
+  if (labelsLayer) map.removeLayer(labelsLayer);
+  baseLayer = L.tileLayer(config.base.url, config.base.options);
+  labelsLayer = L.tileLayer(config.labels.url, config.labels.options);
+  baseLayer.addTo(map);
+  labelsLayer.addTo(map);
+}
+
+function applyTheme(theme, { persist = true } = {}) {
+  if (!THEMES.includes(theme)) return;
+  if (persist) writeStoredTheme(theme);
+  document.body.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  syncThemeButtons(theme);
+  mountBaseLayer(theme);
+}
+
+function resolveInitialTheme() {
+  const storedTheme = readStoredTheme();
+  if (THEMES.includes(storedTheme)) return storedTheme;
+  const mediaQuery = window.matchMedia?.("(prefers-color-scheme: light)");
+  return mediaQuery?.matches ? "light" : "dark";
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -435,6 +519,14 @@ el.catalogSearch?.addEventListener("input", () => {
 
 $("mapped-btn")?.addEventListener("click", openCatalog);
 $("catalog-close")?.addEventListener("click", closeCatalog);
+[el.themeDarkBtn, el.themeLightBtn].forEach((button) =>
+  button?.addEventListener("click", () => applyTheme(button.dataset.themeValue)),
+);
+
+window.matchMedia?.("(prefers-color-scheme: light)")?.addEventListener?.("change", (event) => {
+  if (readStoredTheme()) return;
+  applyTheme(event.matches ? "light" : "dark", { persist: false });
+});
 
 /* ═══════════════════════════════════════════════════════
    INSTITUTIONS OVERLAY
@@ -534,6 +626,7 @@ document.addEventListener("keydown", (event) => {
 
 el.searchInput.addEventListener("input", applyFilters);
 el.typeFilter.addEventListener("change", applyFilters);
+applyTheme(resolveInitialTheme(), { persist: false });
 
 (async () => {
   try {

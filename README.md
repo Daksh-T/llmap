@@ -8,11 +8,17 @@ An editorial map page for the Locating Slavery's Legacies project, powered by th
 bun run dev
 ```
 
-This uses `vercel dev`, so local development mirrors the Vercel deployment shape:
+This uses the local Bun server in `dev.ts`, which mirrors the Vercel routing shape without invoking `vercel dev` recursively:
 
 - `index.html` for the static page
 - `public/` for static assets
 - `api/legacies.ts` for the serverless data endpoint
+
+If you specifically want to boot the Vercel CLI locally, use:
+
+```bash
+bun run dev:vercel
+```
 
 ## Deployment
 

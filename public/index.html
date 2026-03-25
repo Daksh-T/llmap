@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
     <title>Locating Legacies Atlas</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -18,7 +19,7 @@
     />
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
+  <body data-theme="dark">
     <div class="grain"></div>
 
     <div class="app">
@@ -44,6 +45,10 @@
           <select id="type-filter" class="topbar-select">
             <option value="all">All types</option>
           </select>
+          <div class="theme-toggle" role="group" aria-label="Color theme">
+            <button class="theme-btn is-active" id="theme-dark-btn" data-theme-value="dark" type="button" aria-pressed="true">Dark</button>
+            <button class="theme-btn" id="theme-light-btn" data-theme-value="light" type="button" aria-pressed="false">Light</button>
+          </div>
         </div>
 
         <div class="topbar-stats">

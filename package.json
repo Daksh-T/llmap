@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bunx --bun vercel dev",
+    "dev": "bun dev.ts",
+    "dev:vercel": "bunx --bun vercel dev",
     "deploy": "bunx --bun vercel",
     "deploy:prod": "bunx --bun vercel --prod"
   }
