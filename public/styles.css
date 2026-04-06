@@ -282,10 +282,17 @@ body {
   width: var(--ledger-w); flex-shrink: 0;
   display: flex; flex-direction: column;
   background: var(--surface); border-right: 1px solid var(--border);
+  overflow: hidden;
+  transition: width 220ms var(--ease), opacity 180ms, border-color 180ms;
+}
+.ledger.is-collapsed {
+  width: 0; border-right-color: transparent; opacity: 0;
+  pointer-events: none;
 }
 .ledger-cap {
   display: flex; align-items: baseline; justify-content: space-between;
   padding: 10px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  min-width: var(--ledger-w);
 }
 .ledger-heading {
   font-family: var(--mono); font-size: 10px;
@@ -295,7 +302,7 @@ body {
   font-family: var(--mono); font-size: 11px; font-weight: 500; color: var(--accent);
 }
 .ledger-scroll {
-  flex: 1; overflow-y: auto;
+  flex: 1; overflow-y: auto; min-width: var(--ledger-w);
   scrollbar-width: thin; scrollbar-color: var(--surface-4) transparent;
 }
 .ledger-scroll::-webkit-scrollbar { width: 3px; }
@@ -305,11 +312,7 @@ body {
 .ledger-entry {
   position: relative; padding: 12px 16px 12px 42px;
   border-bottom: 1px solid var(--border); cursor: pointer;
-  transition: background 100ms; animation: entry-in 260ms var(--ease) both;
-}
-@keyframes entry-in {
-  from { opacity: 0; transform: translateX(-5px); }
-  to   { opacity: 1; transform: none; }
+  transition: background 120ms var(--ease-fast);
 }
 .ledger-entry::before {
   content: attr(data-idx); position: absolute; left: 10px; top: 14px;
@@ -346,7 +349,32 @@ body {
 /* ══════════════════════════════════════════════════════════
    CARTOGRAPH
    ══════════════════════════════════════════════════════════ */
-.cartograph { flex: 1; position: relative; overflow: hidden; background: var(--map-shell); min-width: 0; }
+.cartograph { flex: 1; position: relative; overflow: hidden; background: var(--map-shell); min-width: 0; isolation: isolate; }
+
+/* Ledger toggle button — z-index must beat Leaflet controls (~1000) */
+.ledger-toggle {
+  position: absolute; top: 12px; left: 12px; z-index: 1200;
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 13px 7px 10px;
+  background: var(--surface); border: 1px solid var(--border-mid);
+  color: var(--text-soft); font-family: var(--mono); font-size: 10px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  cursor: pointer; box-shadow: var(--shadow-soft);
+  transition: background 130ms, border-color 130ms, color 130ms;
+}
+.ledger-toggle svg { width: 14px; height: 14px; flex-shrink: 0; }
+.ledger-toggle:hover { background: var(--surface-2); border-color: var(--border-strong); color: var(--text); }
+
+/* Dossier close button */
+.dossier-close-btn {
+  position: absolute; top: 8px; right: 10px; z-index: 10;
+  background: var(--surface-2); border: 1px solid var(--border-mid);
+  color: var(--text-dim); font-size: 18px; line-height: 1;
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: background 130ms, color 130ms;
+}
+.dossier-close-btn:hover { background: var(--surface-3); color: var(--text); }
 .cartograph::before {
   content: "";
   position: absolute;
@@ -415,13 +443,14 @@ body {
   opacity: 0.96;
 }
 .atlas-marker-echo {
-  background: color-mix(in srgb, var(--marker-color) 74%, var(--map-shell) 26%);
-  border: 1px solid color-mix(in srgb, var(--marker-ring) 40%, transparent);
-  opacity: 0.72;
+  background: color-mix(in srgb, var(--echo-color, var(--marker-color)) 74%, var(--map-shell) 26%);
+  border: 1px solid color-mix(in srgb, var(--echo-color, var(--marker-color)) 44%, transparent);
+  opacity: 0.78;
 }
 .atlas-marker.is-stack .echo-1 { transform: translate(-6px, 4px) scale(0.92); }
 .atlas-marker.is-stack .echo-2 { transform: translate(6px, -3px) scale(0.84); }
 .atlas-marker.is-stack .echo-3 { transform: translate(-2px, -7px) scale(0.76); }
+
 .atlas-marker.is-active::after {
   border-color: var(--marker-active-ring);
   background: var(--marker-active-fill);
@@ -461,6 +490,11 @@ body {
   display: flex; flex-direction: row;
   background: var(--surface); border-left: 1px solid var(--border);
   position: relative; overflow: hidden;
+  transition: width 220ms var(--ease), opacity 180ms, border-color 180ms;
+}
+.dossier.is-hidden {
+  width: 0; overflow: hidden; border-left-color: transparent; opacity: 0;
+  pointer-events: none;
 }
 
 .dossier-handle {
@@ -674,7 +708,8 @@ body {
 }
 
 .cat-thumb {
-  width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block;
+  width: 100%; max-height: 260px; object-fit: contain; display: block;
+  background: var(--surface-2);
   filter: var(--catalog-thumb-filter);
 }
 .cat-placeholder {
@@ -782,6 +817,7 @@ body {
 @media (max-width: 960px) {
   .dossier, .topbar-stats { display: none; }
   :root { --ledger-w: 220px; }
+  .ledger-toggle span { display: none; }
 }
 @media (max-width: 640px) {
   .ledger { display: none; }

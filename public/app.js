@@ -2,7 +2,7 @@
    LOCATING LEGACIES ATLAS
    ───────────────────────────────────────────────────────── */
 
-const map = L.map("map", { zoomControl: false, minZoom: 3, preferCanvas: true })
+const map = L.map("map", { zoomControl: false, minZoom: 3, maxZoom: 20, preferCanvas: true })
   .setView([37.8, -96], 4);
 
 const basePane = map.createPane("basemap-base");
@@ -23,21 +23,21 @@ const BASEMAPS = {
   dark: {
     base: {
       url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png",
-      options: { attribution: TILE_ATTRIBUTION, subdomains: "abcd", maxZoom: 19, pane: "basemap-base" },
+      options: { attribution: TILE_ATTRIBUTION, subdomains: "abcd", maxZoom: 20, maxNativeZoom: 19, pane: "basemap-base" },
     },
     labels: {
       url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png",
-      options: { attribution: "", subdomains: "abcd", maxZoom: 19, pane: "basemap-labels" },
+      options: { attribution: "", subdomains: "abcd", maxZoom: 20, maxNativeZoom: 19, pane: "basemap-labels" },
     },
   },
   light: {
     base: {
       url: "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
-      options: { attribution: TILE_ATTRIBUTION, subdomains: "abcd", maxZoom: 19, pane: "basemap-base" },
+      options: { attribution: TILE_ATTRIBUTION, subdomains: "abcd", maxZoom: 20, maxNativeZoom: 19, pane: "basemap-base" },
     },
     labels: {
       url: "https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",
-      options: { attribution: "", subdomains: "abcd", maxZoom: 19, pane: "basemap-labels" },
+      options: { attribution: "", subdomains: "abcd", maxZoom: 20, maxNativeZoom: 19, pane: "basemap-labels" },
     },
   },
 };
@@ -69,6 +69,9 @@ const el = {
   typeFilter: $("type-filter"),
   themeDarkBtn: $("theme-dark-btn"),
   themeLightBtn: $("theme-light-btn"),
+  // Ledger
+  ledger: document.querySelector(".ledger"),
+  ledgerToggle: $("ledger-toggle"),
   // Modals
   instModal: $("inst-modal"), instList: $("inst-list"),
   instSearch: $("inst-search"), instClose: $("inst-close"), instBackdrop: $("inst-backdrop"),
@@ -77,6 +80,7 @@ const el = {
   catalogCount: $("catalog-count"),
   // Resize
   dossier: $("dossier"), dossierHandle: $("dossier-handle"),
+  dossierClose: $("dossier-close"),
 };
 
 /* ── Type colours ─────────────────────────────────────── */
@@ -98,6 +102,47 @@ function typeColor(t) {
 }
 
 /* ── Helpers ──────────────────────────────────────────── */
+
+function buildHaystack(r) {
+  return [r.title, r.description, r.place, r.label, r.spatial,
+    ...(r.types || []), ...(r.contexts || []), ...(r.periods || []), ...(r.people || [])]
+    .filter(Boolean).join(" ").toLowerCase();
+}
+
+function scrollToActive(block = "nearest") {
+  const active = el.resultsList.querySelector(".is-active");
+  if (!(active instanceof HTMLElement)) return;
+
+  // Walk up from the active element to find the scroll container
+  let container = active.parentElement;
+  while (container && container !== document.body) {
+    if (container.scrollHeight > container.clientHeight + 2) break;
+    container = container.parentElement;
+  }
+  if (!(container instanceof HTMLElement)) return;
+
+  // Compute the active entry's top relative to the scrolling container.
+  let activeTop = active.offsetTop;
+  let offsetParent = active.offsetParent;
+  while (offsetParent && offsetParent !== container) {
+    activeTop += offsetParent.offsetTop;
+    offsetParent = offsetParent.offsetParent;
+  }
+  const activeBottom = activeTop + active.offsetHeight;
+  const viewTop = container.scrollTop;
+  const viewBottom = viewTop + container.clientHeight;
+
+  let nextScrollTop;
+  if (block === "center") {
+    nextScrollTop = activeTop - (container.clientHeight / 2) + (active.offsetHeight / 2);
+  } else {
+    if (activeTop < viewTop) nextScrollTop = activeTop - 8;
+    else if (activeBottom > viewBottom) nextScrollTop = activeBottom - container.clientHeight + 8;
+    else return;
+  }
+
+  container.scrollTo({ top: Math.max(0, nextScrollTop), behavior: "smooth" });
+}
 
 function esc(v) {
   return String(v)
@@ -164,23 +209,58 @@ function resolveInitialTheme() {
 }
 
 /* ═══════════════════════════════════════════════════════
-   MAP MARKERS  (exact-overlap stacks, no counts)
+   MAP MARKERS  (proximity-grouped stacks with cycling)
    ═══════════════════════════════════════════════════════ */
 
-function markerGroupKey(rec) {
-  return `${rec.lat}|${rec.lng}`;
+// ~55m at US latitudes — groups same-building/adjacent memorials
+const PROXIMITY_THRESHOLD = 0.0005;
+
+function groupRecordsByProximity(records) {
+  const groups = [];
+  const assigned = new Set();
+
+  for (const rec of records) {
+    if (assigned.has(rec.id)) continue;
+    const group = [rec];
+    assigned.add(rec.id);
+
+    // Keep scanning: each newly added member can pull in more neighbours
+    for (let gi = 0; gi < group.length; gi++) {
+      const member = group[gi];
+      for (const other of records) {
+        if (assigned.has(other.id)) continue;
+        if (
+          Math.abs(member.lat - other.lat) < PROXIMITY_THRESHOLD &&
+          Math.abs(member.lng - other.lng) < PROXIMITY_THRESHOLD
+        ) {
+          group.push(other);
+          assigned.add(other.id);
+        }
+      }
+    }
+
+    groups.push(group);
+  }
+
+  return groups;
 }
 
 function getMarkerBaseRecord(records) {
   return records.find((rec) => rec.id === state.selectedId) ?? records[0];
 }
 
-function markerIcon(records, active) {
-  const base = getMarkerBaseRecord(records);
-  const size = records.length > 1 ? (active ? 28 : 24) : (active ? 20 : 14);
-  const echoes = records.length > 1
-    ? Array.from({ length: Math.min(records.length - 1, 3) }, (_, index) =>
-        `<span class="atlas-marker-echo echo-${index + 1}"></span>`,
+function markerIcon(records, active, base) {
+  if (!base) base = getMarkerBaseRecord(records);
+  const stackExtra = Math.min(records.length - 1, 8) * 1.5;
+  const size = records.length === 1
+    ? (active ? 20 : 14)
+    : Math.round((active ? 24 : 18) + stackExtra);
+
+  // Each echo uses the actual type color of a different record in the group
+  const others = records.filter((r) => r !== base);
+  const echoes = others.length > 0
+    ? others.slice(0, 3).map((rec, index) =>
+        `<span class="atlas-marker-echo echo-${index + 1}" style="--echo-color:${typeColor(rec.type)}"></span>`,
       ).join("")
     : "";
 
@@ -204,7 +284,7 @@ function markerTooltip(records) {
   const base = getMarkerBaseRecord(records);
   const loc = base.label || base.place || base.spatial || "Mapped memorial";
   const overlapNote = records.length > 1
-    ? `<br>${records.length - 1} other memorial${records.length > 2 ? "s" : ""} share this exact point`
+    ? `<br>${records.length - 1} other memorial${records.length > 2 ? "s" : ""} nearby &middot; click to cycle`
     : "";
   return `<strong>${esc(base.title)}</strong>${esc(loc)}${overlapNote}`;
 }
@@ -216,52 +296,71 @@ function nextMarkerRecord(records) {
   return records[(currentIndex + 1) % records.length];
 }
 
-function updateMarkerStyles() {
-  state.markerGroups.forEach(({ marker, records }) => {
-    const active = records.some((rec) => rec.id === state.selectedId);
+function updateMarkerStyles(prevId) {
+  for (const { marker, records } of state.markerGroups) {
+    const hadPrev = prevId != null && records.some((rec) => rec.id === prevId);
+    const hasNew = state.selectedId != null && records.some((rec) => rec.id === state.selectedId);
+    if (!hadPrev && !hasNew) continue;
+    const active = hasNew;
     marker.setIcon(markerIcon(records, active));
     marker.setTooltipContent(markerTooltip(records));
-    if (active) {
-      marker.openTooltip();
-      marker.setZIndexOffset(1000);
-    } else {
-      marker.closeTooltip();
-      marker.setZIndexOffset(0);
-    }
-  });
+    marker.setZIndexOffset(active ? 1000 : 0);
+  }
 }
 
-function rebuildMarkers() {
+function rebuildMarkers(precomputedGroups, fitView = false) {
   layerGroup.clearLayers();
   state.markers.clear();
   state.markerGroups = [];
   const bounds = [];
-  const grouped = new Map();
 
-  state.filtered.forEach((rec) => {
-    const key = markerGroupKey(rec);
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key).push(rec);
-    bounds.push([rec.lat, rec.lng]);
-  });
+  const groups = precomputedGroups || groupRecordsByProximity(state.filtered);
 
-  grouped.forEach((records) => {
+  groups.forEach((records) => {
     const base = getMarkerBaseRecord(records);
     const active = records.some((rec) => rec.id === state.selectedId);
-    const marker = L.marker([base.lat, base.lng], {
-      icon: markerIcon(records, active),
+    const markerLat = Number(base.lat);
+    const markerLng = Number(base.lng);
+    const marker = L.marker([markerLat, markerLng], {
+      icon: markerIcon(records, active, base),
       keyboard: false,
     });
 
     marker.bindTooltip(markerTooltip(records), { sticky: true, direction: "top" });
-    marker.on("click", () => selectRecord(nextMarkerRecord(records).id, false));
+    marker.on("click", () => {
+      const next = nextMarkerRecord(records);
+      // Only fly on first click (selecting this group); cycling within it stays put
+      const alreadyHere = records.some((r) => r.id === state.selectedId);
+      selectRecord(next.id, !alreadyHere);
+    });
     marker.addTo(layerGroup);
 
     state.markerGroups.push({ marker, records });
-    records.forEach((rec) => state.markers.set(rec.id, marker));
+    records.forEach((rec) => {
+      state.markers.set(rec.id, marker);
+      const lat = Number(rec.lat);
+      const lng = Number(rec.lng);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) bounds.push([lat, lng]);
+    });
   });
 
-  if (bounds.length) map.fitBounds(bounds, { padding: [42, 42] });
+  if (fitView && bounds.length) {
+    try {
+      if (bounds.length === 1) {
+        map.setView(bounds[0], 16, { animate: true });
+        return;
+      }
+
+      const lb = L.latLngBounds(bounds.map(([lat, lng]) => L.latLng(lat, lng)));
+      if (!lb.isValid()) return;
+
+      const diagKm = map.distance(lb.getSouthWest(), lb.getNorthEast()) / 1000;
+      const maxZoom = diagKm < 5 ? 16 : diagKm < 50 ? 14 : diagKm < 300 ? 11 : 8;
+      map.fitBounds(lb, { padding: [42, 42], maxZoom });
+    } catch (err) {
+      console.error("Failed to fit map to filtered results", err, bounds);
+    }
+  }
 }
 
 function getSelectionZoom(rec) {
@@ -376,65 +475,105 @@ function renderFeature(rec) {
    LEDGER
    ═══════════════════════════════════════════════════════ */
 
+// Full re-render — called only when the filtered data set changes
 function renderResults() {
-  el.resultsNote.textContent = `${state.filtered.length} entries`;
-  el.resultsList.innerHTML = state.filtered.slice(0, 80).map((r, i) => {
+  // Only show count when actively filtering (redundant with topbar otherwise)
+  const isFiltered = state.filtered.length !== state.records.length;
+  el.resultsNote.textContent = isFiltered ? `${state.filtered.length} results` : "";
+
+  el.resultsList.innerHTML = state.filtered.map((r, i) => {
     const a    = r.id === state.selectedId ? " is-active" : "";
     const tags = [r.type, r.spatial].filter(Boolean).slice(0, 2);
     const n    = String(i + 1).padStart(3, "0");
-    const d    = Math.min(i * 15, 550);
     return `
-      <article class="ledger-entry${a}" data-id="${r.id}" data-idx="${n}" style="animation-delay:${d}ms">
+      <article class="ledger-entry${a}" data-id="${r.id}" data-idx="${n}">
         <h3 class="entry-title">${esc(r.title)}</h3>
         <p class="entry-loc">${esc(r.label || r.place || r.spatial || "—")}</p>
         <div class="entry-tags">${tags.map((t) => `<span class="entry-tag">${esc(t)}</span>`).join("")}</div>
       </article>`;
   }).join("");
 
-  el.resultsList.querySelector(".is-active")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   el.resultsList.querySelectorAll(".ledger-entry").forEach((c) =>
     c.addEventListener("click", () => selectRecord(Number(c.dataset.id), true)),
   );
+}
+
+// Lightweight highlight update — toggles classes without rebuilding DOM
+function updateResultsHighlight() {
+  el.resultsList.querySelectorAll(".ledger-entry").forEach((c) => {
+    c.classList.toggle("is-active", Number(c.dataset.id) === state.selectedId);
+  });
 }
 
 /* ═══════════════════════════════════════════════════════
    SELECTION + FILTERING
    ═══════════════════════════════════════════════════════ */
 
+function smartFlyTo(rec) {
+  const target = L.latLng(rec.lat, rec.lng);
+  const targetZoom = getSelectionZoom(rec);
+  const currentZoom = map.getZoom();
+  const inView = map.getBounds().contains(target);
+
+  // Already zoomed in and point is visible — gentle pan to center it
+  if (inView && currentZoom >= targetZoom - 1) {
+    map.panTo(target, { animate: true, duration: 0.25 });
+    return;
+  }
+
+  // Nearby: moderate fly
+  const dist = map.distance(map.getCenter(), target);
+  if (dist < 8000 && currentZoom >= targetZoom - 3) {
+    map.flyTo(target, Math.max(currentZoom, targetZoom), { duration: 0.4 });
+    return;
+  }
+
+  // Distant — full fly
+  map.flyTo(target, targetZoom, { duration: 0.6 });
+}
+
 function selectRecord(id, pan = false) {
+  const prevId = state.selectedId;
   const rec = state.filtered.find((r) => r.id === id) || state.records.find((r) => r.id === id);
   state.selectedId = rec?.id ?? null;
   renderFeature(rec ?? null);
-  renderResults();
-  updateMarkerStyles();
+  updateResultsHighlight();
+  updateMarkerStyles(prevId);
+  if (rec) {
+    const wasCollapsed = el.ledger.classList.contains("is-collapsed");
+    el.dossier.classList.remove("is-hidden");
+    el.ledger.classList.remove("is-collapsed");
+    if (wasCollapsed) {
+      setTimeout(scrollToActive, 260);
+    } else {
+      scrollToActive();
+    }
+  } else {
+    el.dossier.classList.add("is-hidden");
+  }
   if (pan && rec) {
-    map.flyTo([rec.lat, rec.lng], getSelectionZoom(rec), { duration: 0.7 });
+    smartFlyTo(rec);
   }
 }
 
 function applyFilters() {
   const q = el.searchInput.value.trim().toLowerCase();
   const t = el.typeFilter.value;
+  const fitView = Boolean(q) || t !== "all";
   state.filtered = state.records.filter((r) => {
-    const hay = [
-      r.title,
-      r.description,
-      r.place,
-      r.label,
-      r.spatial,
-      ...(r.types || []),
-      ...(r.contexts || []),
-      ...(r.periods || []),
-      ...(r.people || []),
-    ]
-      .filter(Boolean).join(" ").toLowerCase();
+    const hay = buildHaystack(r);
     return (!q || hay.includes(q)) && (t === "all" || (r.types?.length ? r.types.includes(t) : r.type === t));
   });
-  rebuildMarkers();
+
+  // Sort so proximity-grouped items appear adjacent in the ledger
+  const groups = groupRecordsByProximity(state.filtered);
+  groups.sort((a, b) => (a[0].spatial || "").localeCompare(b[0].spatial || ""));
+  state.filtered = groups.flat();
+
+  rebuildMarkers(groups, fitView);
   renderResults();
   if (!state.filtered.some((r) => r.id === state.selectedId))
-    selectRecord(state.filtered[0]?.id ?? null, false);
-  else updateMarkerStyles();
+    selectRecord(null, false);
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -471,6 +610,10 @@ function renderCatalogCards(list) {
     const openCard = () => {
       const id = Number(c.dataset.id);
       closeCatalog();
+      // Clear any active filters so the selected record is visible on the map
+      el.searchInput.value = "";
+      el.typeFilter.value = "all";
+      applyFilters();
       selectRecord(id, true);
     };
     c.addEventListener("click", openCard);
@@ -499,21 +642,7 @@ el.catalogSearch?.addEventListener("input", () => {
   const q = el.catalogSearch.value.trim().toLowerCase();
   if (!q) { renderCatalogCards(state.records); return; }
   renderCatalogCards(
-    state.records.filter((r) => {
-      const hay = [
-        r.title,
-        r.description,
-        r.place,
-        r.label,
-        r.spatial,
-        ...(r.types || []),
-        ...(r.contexts || []),
-        ...(r.periods || []),
-        ...(r.people || []),
-      ]
-        .filter(Boolean).join(" ").toLowerCase();
-      return hay.includes(q);
-    }),
+    state.records.filter((r) => buildHaystack(r).includes(q)),
   );
 });
 
@@ -532,6 +661,40 @@ window.matchMedia?.("(prefers-color-scheme: light)")?.addEventListener?.("change
    INSTITUTIONS OVERLAY
    ═══════════════════════════════════════════════════════ */
 
+// Keys use the full "Name; City, State" format from the API's dcterms:spatial field
+const INSTITUTION_URLS = {
+  "College of William and Mary; Williamsburg, Virginia": "https://locatinglegacies.org/s/william-and-mary/page/home",
+  "Davidson College; Davidson, North Carolina": "https://locatinglegacies.org/s/davidson/page/welcome",
+  "Elon University; Elon, North Carolina": "https://locatinglegacies.org/s/elon/page/home",
+  "Emory University; Atlanta, Georgia": "https://locatinglegacies.org/s/emory/page/welcome",
+  "Furman University; Greenville, South Carolina": "https://locatinglegacies.org/s/furman/page/home",
+  "Hampden-Sydney College; Hampden Sydney, Virginia": "https://locatinglegacies.org/s/hampden-sydney/page/welcome",
+  "Hendrix College; Conway, Arkansas": "https://locatinglegacies.org/s/hendrix/page/welcome",
+  "Loyola University Maryland; Baltimore, Maryland": "https://locatinglegacies.org/s/loyola-maryland/page/welcome",
+  "Meredith College; Raleigh, North Carolina": "https://locatinglegacies.org/s/meredith/page/home",
+  "Rhodes College; Memphis, Tennessee": "https://locatinglegacies.org/s/rhodes/page/welcome",
+  "Rollins College; Winter Park, Florida": "https://locatinglegacies.org/s/rollins/page/home",
+  "University of Alabama; Tuscaloosa, Alabama": "https://locatinglegacies.org/s/UA/page/welcome",
+  "University of Georgia; Athens, Georgia": "https://locatinglegacies.org/s/UGA/page/welcome",
+  "University of South Carolina; Columbia, South Carolina": "https://locatinglegacies.org/s/USC/page/welcome",
+  "University of the South; Sewanee, Tennessee": "https://locatinglegacies.org/s/Sewanee/page/home",
+  "University of Virginia; Charlottesville, Virginia": "https://locatinglegacies.org/s/UVA/page/welcome",
+  "Virginia Military Institute; Lexington, Virginia": "https://locatinglegacies.org/s/VMI/page/home",
+  "Western Kentucky University; Bowling Green, Kentucky": "https://locatinglegacies.org/s/WKU/page/welcome",
+  "Wofford College; Spartanburg, South Carolina": "https://locatinglegacies.org/s/wofford/page/home",
+};
+
+function institutionUrl(name) {
+  // Try exact match first (fastest path)
+  if (INSTITUTION_URLS[name]) return INSTITUTION_URLS[name];
+  // Fallback: match by institution name before the semicolon
+  const shortName = name.split(";")[0].trim().toLowerCase();
+  for (const [key, url] of Object.entries(INSTITUTION_URLS)) {
+    if (key.split(";")[0].trim().toLowerCase() === shortName) return url;
+  }
+  return "https://locatinglegacies.org/s/hub/page/partners";
+}
+
 function openInstitutions() {
   const counts = new Map();
   for (const r of state.records) if (r.spatial) counts.set(r.spatial, (counts.get(r.spatial) || 0) + 1);
@@ -539,7 +702,7 @@ function openInstitutions() {
 
   function render(list) {
     el.instList.innerHTML = list.map(([name, count]) => {
-      const url = "https://locatinglegacies.org/s/hub/search?fulltext_search=" + encodeURIComponent(name);
+      const url = institutionUrl(name);
       return `
         <div class="inst-row" data-inst="${esc(name)}">
           <div class="inst-info">
@@ -628,13 +791,30 @@ el.searchInput.addEventListener("input", applyFilters);
 el.typeFilter.addEventListener("change", applyFilters);
 applyTheme(resolveInitialTheme(), { persist: false });
 
+el.ledger?.addEventListener("transitionend", (e) => {
+  if (e.propertyName === "width") map.invalidateSize({ animate: false, pan: false });
+});
+
+el.dossier?.addEventListener("transitionend", (e) => {
+  if (e.propertyName === "width") map.invalidateSize({ animate: false, pan: false });
+});
+
+/* ── Ledger toggle ───────────────────────────────────── */
+el.ledgerToggle?.addEventListener("click", () => {
+  el.ledger.classList.toggle("is-collapsed");
+});
+
+/* ── Dossier close ───────────────────────────────────── */
+el.dossierClose?.addEventListener("click", () => {
+  selectRecord(null, false);
+});
+
 (async () => {
   try {
     const res = await fetch("/api/legacies");
     if (!res.ok) throw new Error("Failed");
     const { meta, records } = await res.json();
     state.records = records;
-    state.filtered = records;
 
     const types = [...new Set(records.flatMap((r) => r.types?.length ? r.types : (r.type ? [r.type] : [])))].sort();
     el.typeFilter.innerHTML =
@@ -646,7 +826,6 @@ applyTheme(resolveInitialTheme(), { persist: false });
     el.fetchedAt.textContent = `Live · ${fmtDate(meta.fetchedAt)}`;
 
     applyFilters();
-    selectRecord(state.filtered[0]?.id ?? null, false);
   } catch (err) {
     console.error(err);
     el.featureCard.innerHTML = `

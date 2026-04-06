@@ -68,8 +68,8 @@
       <!-- ── Workspace ──────────────────────────────────── -->
       <div class="workspace">
 
-        <!-- LEFT: Ledger index -->
-        <nav class="ledger" aria-label="Memorial index">
+        <!-- LEFT: Ledger index (collapsed by default) -->
+        <nav class="ledger is-collapsed" aria-label="Memorial index">
           <div class="ledger-cap">
             <span class="ledger-heading">Index</span>
             <span class="ledger-count" id="results-note">&hellip;</span>
@@ -79,12 +79,17 @@
 
         <!-- CENTER: Map -->
         <main class="cartograph">
+          <button class="ledger-toggle" id="ledger-toggle" type="button" title="Toggle memorial index">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 4h12M2 8h8M2 12h10"/></svg>
+            <span>Index</span>
+          </button>
           <div id="map" class="map-canvas" aria-label="Interactive map of memorial records"></div>
         </main>
 
-        <!-- RIGHT: Dossier (resizable, record only) -->
-        <aside class="dossier" id="dossier">
+        <!-- RIGHT: Dossier (hidden by default) -->
+        <aside class="dossier is-hidden" id="dossier">
           <div class="dossier-handle" id="dossier-handle" title="Drag to resize"></div>
+          <button class="dossier-close-btn" id="dossier-close" type="button" title="Close panel">&times;</button>
           <div class="dossier-scroll">
             <div id="feature-card" class="record-view">
               <div class="record-empty">
