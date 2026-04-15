@@ -154,6 +154,11 @@ function fmtDate(v) {
   return new Date(v).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
+function safeRecordId(value) {
+  const id = Number(value);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 function isTypingTarget(target) {
   if (!(target instanceof HTMLElement)) return false;
   return target.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(target.tagName);
@@ -400,6 +405,16 @@ function renderFeature(rec) {
     return;
   }
 
+  const recordId = safeRecordId(rec.id);
+  if (recordId == null) {
+    el.featureCard.innerHTML = `
+      <div class="record-empty">
+        <span class="record-empty-glyph">&#9888;</span>
+        <p>This record has an invalid identifier and cannot be displayed safely.</p>
+      </div>`;
+    return;
+  }
+
   const place = rec.place || rec.label || rec.spatial || "—";
   const showInstitution = rec.spatial && place !== rec.spatial;
   const typeValues = rec.types?.length ? rec.types : (rec.type ? [rec.type] : []);
@@ -443,7 +458,7 @@ function renderFeature(rec) {
   el.featureCard.innerHTML = `
     ${img}
     <div class="record-body">
-      <span class="record-eyebrow">Source Item &middot; #${rec.id}</span>
+      <span class="record-eyebrow">Source Item &middot; #${recordId}</span>
       ${typeBadge}
       <h2 class="record-title">${esc(rec.title)}</h2>
       <p class="record-desc" id="feat-desc">${esc(preview)}</p>
@@ -455,7 +470,7 @@ function renderFeature(rec) {
       </div>
       <div class="record-actions">
         <a class="record-link primary" href="${esc(rec.itemUrl)}" target="_blank" rel="noreferrer">Open source record</a>
-        <span class="record-id">ID&middot;${rec.id}</span>
+        <span class="record-id">ID&middot;${recordId}</span>
       </div>
     </div>`;
 
@@ -482,11 +497,13 @@ function renderResults() {
   el.resultsNote.textContent = isFiltered ? `${state.filtered.length} results` : "";
 
   el.resultsList.innerHTML = state.filtered.map((r, i) => {
+    const recordId = safeRecordId(r.id);
+    if (recordId == null) return "";
     const a    = r.id === state.selectedId ? " is-active" : "";
     const tags = [r.type, r.spatial].filter(Boolean).slice(0, 2);
     const n    = String(i + 1).padStart(3, "0");
     return `
-      <article class="ledger-entry${a}" data-id="${r.id}" data-idx="${n}">
+      <article class="ledger-entry${a}" data-id="${recordId}" data-idx="${n}">
         <h3 class="entry-title">${esc(r.title)}</h3>
         <p class="entry-loc">${esc(r.label || r.place || r.spatial || "—")}</p>
         <div class="entry-tags">${tags.map((t) => `<span class="entry-tag">${esc(t)}</span>`).join("")}</div>
@@ -533,8 +550,12 @@ function smartFlyTo(rec) {
 }
 
 function selectRecord(id, pan = false) {
+  const normalizedId = id == null ? null : safeRecordId(id);
   const prevId = state.selectedId;
-  const rec = state.filtered.find((r) => r.id === id) || state.records.find((r) => r.id === id);
+  const rec =
+    normalizedId == null
+      ? null
+      : state.filtered.find((r) => r.id === normalizedId) || state.records.find((r) => r.id === normalizedId);
   state.selectedId = rec?.id ?? null;
   renderFeature(rec ?? null);
   updateResultsHighlight();
@@ -586,13 +607,15 @@ function renderCatalogCards(list) {
     return;
   }
   el.catalogGrid.innerHTML = list.map((r) => {
+    const recordId = safeRecordId(r.id);
+    if (recordId == null) return "";
     const siteLabel = r.label || r.place || r.spatial || null;
     const showRecordTitle = siteLabel && siteLabel !== r.title;
     const thumb = r.image
       ? `<img class="cat-thumb" src="${esc(r.image)}" alt="" loading="lazy" />`
       : `<div class="cat-placeholder"><div class="cat-ph-dot" style="background:${typeColor(r.type)}"></div></div>`;
     return `
-      <div class="cat-card" data-id="${r.id}" tabindex="0">
+      <div class="cat-card" data-id="${recordId}" tabindex="0">
         ${thumb}
         <div class="cat-body">
           <h3 class="cat-title">${esc(siteLabel || r.title)}</h3>
