@@ -481,6 +481,24 @@ function renderFeature(rec) {
       </div>
     </div>`;
 
+  // Adapt image container height/framing to the photo's natural aspect ratio
+  const imgWrap = el.featureCard.querySelector(".record-img-wrap");
+  const imgEl = imgWrap?.querySelector(".record-img");
+  if (imgWrap && imgEl) {
+    const syncAspect = () => {
+      if (!imgEl.naturalWidth || !imgEl.naturalHeight) return;
+      const ratio = imgEl.naturalWidth / imgEl.naturalHeight;
+      imgWrap.dataset.aspect =
+        ratio < 0.85 ? "portrait" : ratio > 1.15 ? "landscape" : "square";
+    };
+    if (imgEl.complete && imgEl.naturalWidth > 0) {
+      syncAspect();
+    } else {
+      imgEl.addEventListener("load", syncAspect, { once: true });
+      imgEl.addEventListener("error", () => imgWrap.classList.add("is-error"), { once: true });
+    }
+  }
+
   // Expand / collapse
   if (clipped) {
     const btn = $("feat-expand"), desc = $("feat-desc");

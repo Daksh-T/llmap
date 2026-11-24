@@ -527,16 +527,57 @@ body {
 .record-empty-glyph { font-size: 20px; color: var(--text-dim); }
 .record-empty p { font-size: 14px; color: var(--text-soft); line-height: 1.8; max-width: 20ch; }
 
-/* Image with gradient bleed */
-.record-img-wrap { position: relative; overflow: hidden; }
+/* Image with adaptive aspect-ratio framing */
+.record-img-wrap {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+}
 .record-img-wrap::after {
   content: ""; position: absolute; bottom: 0; left: 0; right: 0;
-  height: 50%; background: linear-gradient(transparent, var(--surface));
+  height: 24%; background: linear-gradient(transparent, var(--surface));
   pointer-events: none;
 }
 .record-img {
-  width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block;
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: min(420px, 52vh);
+  object-fit: contain;
   filter: var(--record-image-filter);
+}
+.record-img-wrap[data-aspect="landscape"] {
+  min-height: 0;
+}
+.record-img-wrap[data-aspect="landscape"] .record-img {
+  width: 100%;
+  max-height: min(360px, 46vh);
+}
+.record-img-wrap[data-aspect="square"] {
+  min-height: 0;
+}
+.record-img-wrap[data-aspect="square"] .record-img {
+  width: 100%;
+  max-height: min(440px, 56vh);
+}
+.record-img-wrap[data-aspect="portrait"] {
+  min-height: 0;
+  padding: 14px 16px 10px;
+}
+.record-img-wrap[data-aspect="portrait"]::after {
+  height: 12%;
+}
+.record-img-wrap[data-aspect="portrait"] .record-img {
+  width: auto;
+  max-width: 100%;
+  max-height: min(580px, 70vh);
+}
+.record-img-wrap.is-error {
+  display: none;
 }
 
 /* Body content */
