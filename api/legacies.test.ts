@@ -95,6 +95,24 @@ describe("/api/legacies", () => {
     expect(fetchCalls).toBe(1);
   });
 
+  it("falls back to /index.php/api/items when clean URLs return 404", async () => {
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/index.php/api/items")) {
+        return jsonResponse([buildUpstreamItem(99)], 1);
+      }
+      return new Response("Not Found", { status: 404 });
+    }) as typeof fetch;
+
+    const response = await handler.fetch(new Request("https://example.com/api/legacies"));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.source).toBe("live");
+    expect(payload.records).toHaveLength(1);
+    expect(payload.records[0].itemUrl).toBe("https://locatinglegacies.org/index.php/s/hub/item/99");
+  });
+
   it("falls back to the Wayback Machine map snapshot when the live API is unavailable", async () => {
     const markers = [
       {

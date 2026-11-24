@@ -1,5 +1,14 @@
-const API_ROOT = "https://locatinglegacies.org/api/items";
-const SITE_ITEM_URL = "https://locatinglegacies.org/s/hub/item";
+const LIVE_SOURCES = [
+  {
+    apiRoot: "https://locatinglegacies.org/api/items",
+    siteItemUrl: "https://locatinglegacies.org/s/hub/item",
+  },
+  {
+    apiRoot: "https://locatinglegacies.org/index.php/api/items",
+    siteItemUrl: "https://locatinglegacies.org/index.php/s/hub/item",
+  },
+] as const;
+const SITE_ITEM_URL = LIVE_SOURCES[0].siteItemUrl;
 const WAYBACK_TIMESTAMP = "20260411001947";
 const WAYBACK_ARCHIVE_DATE = "2026-04-11T00:19:47Z";
 const WAYBACK_MAP_URL = `https://web.archive.org/web/${WAYBACK_TIMESTAMP}id_/https://locatinglegacies.org/s/hub/page/map`;
@@ -96,8 +105,8 @@ function parseRecordId(value: unknown): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
-function buildUrl(page: number, perPage: number) {
-  const url = new URL(API_ROOT);
+function buildUrl(apiRoot: string, page: number, perPage: number) {
+  const url = new URL(apiRoot);
   url.searchParams.set("site_id", "7");
   url.searchParams.set("resource_template_id[]", "2");
   url.searchParams.set("per_page", String(perPage));
@@ -105,8 +114,8 @@ function buildUrl(page: number, perPage: number) {
   return url;
 }
 
-async function fetchPage(page: number, perPage: number) {
-  const response = await fetch(buildUrl(page, perPage), {
+async function fetchPage(apiRoot: string, page: number, perPage: number) {
+  const response = await fetch(buildUrl(apiRoot, page, perPage), {
     headers: {
       Accept: "application/ld+json",
     },
@@ -123,7 +132,7 @@ async function fetchPage(page: number, perPage: number) {
   return { items, totalResults };
 }
 
-function normalizeRecord(item: UpstreamItem): LegaciesRecord | null {
+function normalizeRecord(item: UpstreamItem, siteItemUrl = SITE_ITEM_URL): LegaciesRecord | null {
   const id = parseRecordId(item["o:id"]);
   if (id == null) return null;
 
@@ -171,7 +180,7 @@ function normalizeRecord(item: UpstreamItem): LegaciesRecord | null {
       item["thumbnail_display_urls"]?.medium ??
       item["thumbnail_display_urls"]?.square ??
       null,
-    itemUrl: `${SITE_ITEM_URL}/${id}`,
+    itemUrl: `${siteItemUrl}/${id}`,
   };
 }
 
@@ -342,11 +351,11 @@ async function fetchWaybackFallbackData(): Promise<LegaciesPayload> {
   });
 }
 
-async function fetchLiveLegaciesData(): Promise<LegaciesPayload> {
+async function fetchLiveLegaciesDataFrom(apiRoot: string, siteItemUrl: string): Promise<LegaciesPayload> {
   const perPage = 100;
   const records: UpstreamItem[] = [];
 
-  const firstPage = await fetchPage(1, perPage);
+  const firstPage = await fetchPage(apiRoot, 1, perPage);
   const totalResults = firstPage.totalResults;
   records.push(...firstPage.items);
 
@@ -359,7 +368,9 @@ async function fetchLiveLegaciesData(): Promise<LegaciesPayload> {
     for (let page = 2; page <= totalPages; page += PAGE_BATCH_SIZE) {
       const batchEnd = Math.min(totalPages, page + PAGE_BATCH_SIZE - 1);
       const batch = await Promise.all(
-        Array.from({ length: batchEnd - page + 1 }, (_, index) => fetchPage(page + index, perPage)),
+        Array.from({ length: batchEnd - page + 1 }, (_, index) =>
+          fetchPage(apiRoot, page + index, perPage),
+        ),
       );
 
       for (const result of batch) {
@@ -369,21 +380,27 @@ async function fetchLiveLegaciesData(): Promise<LegaciesPayload> {
   }
 
   const normalized = records
-    .map(normalizeRecord)
+    .map((item) => normalizeRecord(item, siteItemUrl))
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
 
   return buildPayload(normalized, totalResults, { source: "live" });
 }
 
 async function fetchLegaciesData(): Promise<LegaciesPayload> {
-  try {
-    return await fetchLiveLegaciesData();
-  } catch (liveError) {
+  let lastError: unknown;
+
+  for (const source of LIVE_SOURCES) {
     try {
-      return await fetchWaybackFallbackData();
-    } catch {
-      throw liveError;
+      return await fetchLiveLegaciesDataFrom(source.apiRoot, source.siteItemUrl);
+    } catch (error) {
+      lastError = error;
     }
+  }
+
+  try {
+    return await fetchWaybackFallbackData();
+  } catch {
+    throw lastError;
   }
 }
 
