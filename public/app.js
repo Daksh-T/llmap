@@ -402,6 +402,41 @@ function getSelectionZoom(rec) {
    ═══════════════════════════════════════════════════════ */
 
 const DESC_LIMIT = 380;
+const imageDimensions = new Map();
+
+function measureImageFrame(naturalWidth, naturalHeight, containerWidth) {
+  const ratio = naturalWidth / naturalHeight;
+  const vh = window.innerHeight || 900;
+  const aspect = ratio < 0.85 ? "portrait" : ratio > 1.15 ? "landscape" : "square";
+  const maxHeight =
+    aspect === "portrait"
+      ? Math.min(450, vh * 0.54)
+      : aspect === "landscape"
+        ? Math.min(300, vh * 0.38)
+        : Math.min(360, vh * 0.46);
+  const naturalHeightAtWidth = containerWidth / ratio;
+  return {
+    aspect,
+    targetHeight: Math.round(Math.min(naturalHeightAtWidth, maxHeight)),
+  };
+}
+
+function prefetchAdjacentImages(recordId) {
+  const idx = state.filtered.findIndex((entry) => entry.id === recordId);
+  if (idx < 0) return;
+  for (const neighbor of [state.filtered[idx + 1], state.filtered[idx - 1]]) {
+    const url = neighbor?.image;
+    if (!url || imageDimensions.has(url)) continue;
+    const probe = new Image();
+    probe.decoding = "async";
+    probe.onload = () => {
+      if (probe.naturalWidth && probe.naturalHeight) {
+        imageDimensions.set(url, { width: probe.naturalWidth, height: probe.naturalHeight });
+      }
+    };
+    probe.src = url;
+  }
+}
 
 function renderFeature(rec) {
   if (el.dossierScroll) el.dossierScroll.scrollTop = 0;
@@ -434,8 +469,12 @@ function renderFeature(rec) {
   const clipped  = fullDesc.length > DESC_LIMIT;
   const preview  = clipped ? fullDesc.slice(0, DESC_LIMIT).trimEnd() + "\u2026" : fullDesc;
 
+  const cachedDim = rec.image ? imageDimensions.get(rec.image) : null;
+  const cachedFrame = cachedDim
+    ? measureImageFrame(cachedDim.width, cachedDim.height, el.dossierScroll?.clientWidth || 365)
+    : null;
   const img = rec.image
-    ? `<div class="record-img-wrap"><img class="record-img" src="${esc(rec.image)}" alt="${esc(rec.title)}" /></div>`
+    ? `<div class="record-img-wrap${cachedFrame ? " is-ready" : ""}"${cachedFrame ? ` data-aspect="${cachedFrame.aspect}"` : ""}><img class="record-img" src="${esc(rec.image)}" alt="${esc(rec.title)}"${cachedDim ? ` width="${cachedDim.width}" height="${cachedDim.height}"` : ""} /></div>`
     : "";
 
   const typeBadge = typeValues.length
@@ -484,23 +523,61 @@ function renderFeature(rec) {
       </div>
     </div>`;
 
-  // Adapt image container height/framing to the photo's natural aspect ratio
+  // Smoothly adapt image container height and fade image in without jarring text jumps
   const imgWrap = el.featureCard.querySelector(".record-img-wrap");
   const imgEl = imgWrap?.querySelector(".record-img");
   if (imgWrap && imgEl) {
-    const syncAspect = () => {
+    const revealLoaded = (animateHeight) => {
       if (!imgEl.naturalWidth || !imgEl.naturalHeight) return;
-      const ratio = imgEl.naturalWidth / imgEl.naturalHeight;
-      imgWrap.dataset.aspect =
-        ratio < 0.85 ? "portrait" : ratio > 1.15 ? "landscape" : "square";
+      imageDimensions.set(rec.image, { width: imgEl.naturalWidth, height: imgEl.naturalHeight });
+      const { aspect, targetHeight } = measureImageFrame(
+        imgEl.naturalWidth,
+        imgEl.naturalHeight,
+        imgWrap.clientWidth || el.dossierScroll?.clientWidth || 365,
+      );
+      imgWrap.dataset.aspect = aspect;
+
+      if (!animateHeight) {
+        imgWrap.classList.add("is-ready", "is-loaded");
+        return;
+      }
+
+      const startHeight = imgWrap.offsetHeight;
+      if (Math.abs(startHeight - targetHeight) < 2) {
+        imgWrap.classList.add("is-ready", "is-loaded");
+        return;
+      }
+
+      imgWrap.style.height = `${startHeight}px`;
+      void imgWrap.offsetHeight;
+      imgWrap.style.height = `${targetHeight}px`;
+      imgWrap.classList.add("is-loaded");
+      imgWrap.addEventListener(
+        "transitionend",
+        (event) => {
+          if (event.propertyName !== "height") return;
+          imgWrap.classList.add("is-ready");
+          imgWrap.style.height = "";
+        },
+        { once: true },
+      );
     };
+
     if (imgEl.complete && imgEl.naturalWidth > 0) {
-      syncAspect();
+      revealLoaded(false);
     } else {
-      imgEl.addEventListener("load", syncAspect, { once: true });
-      imgEl.addEventListener("error", () => imgWrap.classList.add("is-error"), { once: true });
+      imgEl.addEventListener("load", () => revealLoaded(!cachedFrame), { once: true });
+      imgEl.addEventListener(
+        "error",
+        () => {
+          imgWrap.classList.add("is-error");
+        },
+        { once: true },
+      );
     }
   }
+
+  prefetchAdjacentImages(recordId);
 
   // Expand / collapse
   if (clipped) {

@@ -535,7 +535,11 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 160px;
+  height: 240px;
+  transition: height 240ms var(--ease);
+}
+.record-img-wrap.is-ready {
+  height: auto;
 }
 .record-img-wrap::after {
   content: ""; position: absolute; bottom: 0; left: 0; right: 0;
@@ -549,23 +553,19 @@ body {
   max-height: min(360px, 46vh);
   object-fit: contain;
   filter: var(--record-image-filter);
+  opacity: 0;
+  transition: opacity 220ms var(--ease);
 }
-.record-img-wrap[data-aspect="landscape"] {
-  min-height: 0;
+.record-img-wrap.is-loaded .record-img {
+  opacity: 1;
 }
 .record-img-wrap[data-aspect="landscape"] .record-img {
   width: 100%;
   max-height: min(300px, 38vh);
 }
-.record-img-wrap[data-aspect="square"] {
-  min-height: 0;
-}
 .record-img-wrap[data-aspect="square"] .record-img {
   width: 100%;
   max-height: min(360px, 46vh);
-}
-.record-img-wrap[data-aspect="portrait"] {
-  min-height: 0;
 }
 .record-img-wrap[data-aspect="portrait"]::after {
   height: 14%;
@@ -577,7 +577,7 @@ body {
   box-shadow: var(--shadow-strong);
 }
 .record-img-wrap.is-error {
-  display: none;
+  height: 0;
 }
 
 /* Body content */
