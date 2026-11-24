@@ -1,10 +1,15 @@
 const API_ROOT = "https://locatinglegacies.org/api/items";
 const SITE_ITEM_URL = "https://locatinglegacies.org/s/hub/item";
+const WAYBACK_TIMESTAMP = "20260411001947";
+const WAYBACK_ARCHIVE_DATE = "2026-04-11T00:19:47Z";
+const WAYBACK_MAP_URL = `https://web.archive.org/web/${WAYBACK_TIMESTAMP}id_/https://locatinglegacies.org/s/hub/page/map`;
+const WAYBACK_ITEM_PREFIX = `https://web.archive.org/web/${WAYBACK_TIMESTAMP}/${SITE_ITEM_URL}`;
 const CACHE_TTL_SECONDS = 60 * 15;
 const CACHE_TTL_MS = CACHE_TTL_SECONDS * 1000;
 const MAX_PAGES = 100;
 const PAGE_BATCH_SIZE = 5;
 const UPSTREAM_TIMEOUT_MS = 10_000;
+const WAYBACK_TIMEOUT_MS = 15_000;
 
 type UpstreamItem = Record<string, any>;
 
@@ -31,6 +36,9 @@ type LegaciesRecord = {
 
 type LegaciesPayload = {
   meta: {
+    source: "live" | "archive";
+    archiveDate?: string;
+    archiveUrl?: string;
     fetchedAt: string;
     totalItems: number;
     mappedItems: number;
@@ -167,7 +175,174 @@ function normalizeRecord(item: UpstreamItem): LegaciesRecord | null {
   };
 }
 
-async function fetchLegaciesData() {
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&nbsp;", " ")
+    .replaceAll("&amp;", "&");
+}
+
+function buildPayload(
+  normalized: LegaciesRecord[],
+  totalItems: number,
+  extraMeta: { source: "live" | "archive"; archiveDate?: string; archiveUrl?: string },
+): LegaciesPayload {
+  const institutions = new Set(
+    normalized.map((item) => item.spatial).filter((value): value is string => Boolean(value)),
+  );
+
+  const types = new Map<string, number>();
+  for (const item of normalized) {
+    const labels = item.types?.length ? item.types : [item.type ?? "Unclassified"];
+    for (const label of labels) {
+      types.set(label, (types.get(label) ?? 0) + 1);
+    }
+  }
+
+  return {
+    meta: {
+      ...extraMeta,
+      fetchedAt: new Date().toISOString(),
+      totalItems,
+      mappedItems: normalized.length,
+      institutions: institutions.size,
+      topTypes: [...types.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .map(([label, count]) => ({ label, count })),
+    },
+    records: normalized,
+  };
+}
+
+function parseWaybackMapHtml(html: string): LegaciesRecord[] {
+  const markersMatch = html.match(/data-markers="([^"]+)"/);
+  if (!markersMatch) {
+    throw new Error("Wayback map snapshot missing data-markers payload");
+  }
+
+  const rawMarkers = JSON.parse(decodeHtmlEntities(markersMatch[1])) as UpstreamItem[];
+  if (!Array.isArray(rawMarkers)) {
+    throw new Error("Wayback map snapshot has invalid data-markers payload");
+  }
+
+  type PopupInfo = {
+    title: string | null;
+    image: string | null;
+    heading: string | null;
+  };
+
+  const popupsByMarkerId = new Map<number, PopupInfo>();
+  const popupsByItemId = new Map<number, PopupInfo>();
+
+  const popupRegex =
+    /<div class="mapping-marker-popup-content"[^>]*data-marker-id="(\d+)"[^>]*data-item-id="(\d+)"[^>]*>([\s\S]*?)<\/div>\s*(?=<div class="mapping-marker-popup-content"|<\/div>)/g;
+
+  for (const match of html.matchAll(popupRegex)) {
+    const markerId = parseRecordId(match[1]);
+    const itemId = parseRecordId(match[2]);
+    const body = match[3] ?? "";
+
+    const titleMatch = body.match(/Item:\s*<a[^>]*>([\s\S]*?)<\/a>/);
+    const imgMatch = body.match(/<img\s+[^>]*src="([^"]+)"/);
+    const headingMatch = body.match(/<h3[^>]*>([\s\S]*?)<\/h3>/);
+
+    const info: PopupInfo = {
+      title: titleMatch ? normalizeText(decodeHtmlEntities(titleMatch[1])) : null,
+      image: imgMatch ? decodeHtmlEntities(imgMatch[1]).trim() || null : null,
+      heading: headingMatch ? normalizeText(decodeHtmlEntities(headingMatch[1])) : null,
+    };
+
+    if (markerId != null) popupsByMarkerId.set(markerId, info);
+    if (itemId != null && !popupsByItemId.has(itemId)) popupsByItemId.set(itemId, info);
+  }
+
+  const recordsByItemId = new Map<number, LegaciesRecord>();
+
+  for (const marker of rawMarkers) {
+    const itemId = parseRecordId(marker?.["o:item"]?.["o:id"]);
+    if (itemId == null) continue;
+
+    const lat = Number(marker?.["o-module-mapping:lat"]);
+    const lng = Number(marker?.["o-module-mapping:lng"]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+    const markerId = parseRecordId(marker?.["o:id"]);
+    const popup =
+      (markerId != null ? popupsByMarkerId.get(markerId) : undefined) ??
+      popupsByItemId.get(itemId);
+
+    const label = normalizeText(
+      typeof marker?.["o-module-mapping:label"] === "string"
+        ? marker["o-module-mapping:label"]
+        : popup?.heading ?? null,
+    );
+    const image = popup?.image ?? null;
+    const title = popup?.title ?? "Untitled memorial";
+
+    const existing = recordsByItemId.get(itemId);
+    if (existing) {
+      if (!existing.image && image) existing.image = image;
+      if (!existing.label && label) existing.label = label;
+      continue;
+    }
+
+    recordsByItemId.set(itemId, {
+      id: itemId,
+      title,
+      description: null,
+      lat,
+      lng,
+      classification: null,
+      types: [],
+      type: null,
+      contexts: [],
+      scope: null,
+      periods: [],
+      temporal: null,
+      spatial: null,
+      place: null,
+      label,
+      people: [],
+      image,
+      itemUrl: `${WAYBACK_ITEM_PREFIX}/${itemId}`,
+    });
+  }
+
+  return [...recordsByItemId.values()];
+}
+
+async function fetchWaybackFallbackData(): Promise<LegaciesPayload> {
+  const response = await fetch(WAYBACK_MAP_URL, {
+    headers: {
+      Accept: "text/html",
+    },
+    signal: AbortSignal.timeout(WAYBACK_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Wayback fallback error: ${response.status}`);
+  }
+
+  const html = await response.text();
+  const normalized = parseWaybackMapHtml(html);
+  if (normalized.length === 0) {
+    throw new Error("Wayback map snapshot contained no valid markers");
+  }
+
+  return buildPayload(normalized, normalized.length, {
+    source: "archive",
+    archiveDate: WAYBACK_ARCHIVE_DATE,
+    archiveUrl: `https://web.archive.org/web/${WAYBACK_TIMESTAMP}/https://locatinglegacies.org/s/hub/page/map`,
+  });
+}
+
+async function fetchLiveLegaciesData(): Promise<LegaciesPayload> {
   const perPage = 100;
   const records: UpstreamItem[] = [];
 
@@ -197,31 +372,19 @@ async function fetchLegaciesData() {
     .map(normalizeRecord)
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
 
-  const institutions = new Set(
-    normalized.map((item) => item.spatial).filter((value): value is string => Boolean(value)),
-  );
+  return buildPayload(normalized, totalResults, { source: "live" });
+}
 
-  const types = new Map<string, number>();
-  for (const item of normalized) {
-    const labels = item.types?.length ? item.types : [item.type ?? "Unclassified"];
-    for (const label of labels) {
-      types.set(label, (types.get(label) ?? 0) + 1);
+async function fetchLegaciesData(): Promise<LegaciesPayload> {
+  try {
+    return await fetchLiveLegaciesData();
+  } catch (liveError) {
+    try {
+      return await fetchWaybackFallbackData();
+    } catch {
+      throw liveError;
     }
   }
-
-  return {
-    meta: {
-      fetchedAt: new Date().toISOString(),
-      totalItems: totalResults,
-      mappedItems: normalized.length,
-      institutions: institutions.size,
-      topTypes: [...types.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 4)
-        .map(([label, count]) => ({ label, count })),
-    },
-    records: normalized,
-  };
 }
 
 async function getCachedPayload() {

@@ -3,12 +3,14 @@
  * Run: bun dev.ts [port]
  *
  * Routes:
+ *   /api/config    → api/config.ts handler
  *   /api/legacies  → api/legacies.ts handler
  *   /*             → public/ static files
  */
 
 import { readFile, stat } from "node:fs/promises";
 import { join, extname } from "node:path";
+import configHandler from "./api/config.ts";
 import handler from "./api/legacies.ts";
 
 const PORT = Number(process.argv[2]) || 3001;
@@ -34,7 +36,11 @@ Bun.serve({
     const url = new URL(req.url);
     const path = url.pathname;
 
-    // ── API route ──────────────────────────────────────────
+    // ── API routes ─────────────────────────────────────────
+    if (path === "/api/config") {
+      return await configHandler.fetch();
+    }
+
     if (path === "/api/legacies") {
       try {
         return await handler.fetch(req);

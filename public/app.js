@@ -44,6 +44,12 @@ const BASEMAPS = {
 
 let baseLayer = null;
 let labelsLayer = null;
+let cartoApiKey = "";
+let configReady = false;
+
+function withCartoKey(url) {
+  return cartoApiKey ? `${url}?key=${encodeURIComponent(cartoApiKey)}` : url;
+}
 
 const layerGroup = L.layerGroup().addTo(map);
 
@@ -188,11 +194,12 @@ function syncThemeButtons(theme) {
 }
 
 function mountBaseLayer(theme) {
+  if (!configReady) return;
   const config = BASEMAPS[theme] || BASEMAPS.dark;
   if (baseLayer) map.removeLayer(baseLayer);
   if (labelsLayer) map.removeLayer(labelsLayer);
-  baseLayer = L.tileLayer(config.base.url, config.base.options);
-  labelsLayer = L.tileLayer(config.labels.url, config.labels.options);
+  baseLayer = L.tileLayer(withCartoKey(config.base.url), config.base.options);
+  labelsLayer = L.tileLayer(withCartoKey(config.labels.url), config.labels.options);
   baseLayer.addTo(map);
   labelsLayer.addTo(map);
 }
@@ -814,6 +821,23 @@ el.searchInput.addEventListener("input", applyFilters);
 el.typeFilter.addEventListener("change", applyFilters);
 applyTheme(resolveInitialTheme(), { persist: false });
 
+(async () => {
+  try {
+    const res = await fetch("/api/config");
+    if (res.ok) {
+      const data = await res.json();
+      if (typeof data?.cartoApiKey === "string") {
+        cartoApiKey = data.cartoApiKey.trim();
+      }
+    }
+  } catch (err) {
+    console.error("Failed to load map config:", err);
+  } finally {
+    configReady = true;
+    mountBaseLayer(document.body.dataset.theme || resolveInitialTheme());
+  }
+})();
+
 el.ledger?.addEventListener("transitionend", (e) => {
   if (e.propertyName === "width") map.invalidateSize({ animate: false, pan: false });
 });
@@ -846,7 +870,10 @@ el.dossierClose?.addEventListener("click", () => {
 
     el.mappedCount.textContent = String(meta.mappedItems);
     el.institutionCount.textContent = String(meta.institutions);
-    el.fetchedAt.textContent = `Live · ${fmtDate(meta.fetchedAt)}`;
+    el.fetchedAt.textContent =
+      meta.source === "archive"
+        ? `Archive · ${fmtDate(meta.archiveDate || meta.fetchedAt)}`
+        : `Live · ${fmtDate(meta.fetchedAt)}`;
 
     applyFilters();
   } catch (err) {

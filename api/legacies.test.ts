@@ -94,4 +94,63 @@ describe("/api/legacies", () => {
     expect(third.status).toBe(200);
     expect(fetchCalls).toBe(1);
   });
+
+  it("falls back to the Wayback Machine map snapshot when the live API is unavailable", async () => {
+    const markers = [
+      {
+        "o:id": 40,
+        "o:item": { "o:id": 12 },
+        "o-module-mapping:lat": 35.2049921,
+        "o-module-mapping:lng": -85.9200333,
+        "o-module-mapping:label": null,
+      },
+      {
+        "o:id": 41,
+        "o:item": { "o:id": 12 },
+        "o-module-mapping:lat": 35.2049921,
+        "o-module-mapping:lng": -85.9200333,
+        "o-module-mapping:label": "Sewanee, Tennessee",
+      },
+    ];
+    const encodedMarkers = JSON.stringify(markers).replaceAll('"', "&quot;");
+    const waybackHtml = `
+      <div class="mapping-map" data-markers="${encodedMarkers}"></div>
+      <div class="mapping-marker-popup-content" style="display:none;" data-marker-id="40" data-item-id="12">
+        <img src="https&#x3A;&#x2F;&#x2F;locatinglegacies.org&#x2F;files&#x2F;medium&#x2F;sample.jpg" alt="">
+        <div>Item: <a target="_blank" href="&#x2F;s&#x2F;hub&#x2F;item&#x2F;12">Painted portrait of William Porcher DuBose.</a></div>
+      </div>
+      <div class="mapping-marker-popup-content" style="display:none;" data-marker-id="41" data-item-id="12">
+        <h3>Sewanee, Tennessee</h3>
+        <div>Item: <a target="_blank" href="&#x2F;s&#x2F;hub&#x2F;item&#x2F;12">Painted portrait of William Porcher DuBose.</a></div>
+      </div>
+    `;
+
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("web.archive.org")) {
+        return new Response(waybackHtml, {
+          status: 200,
+          headers: { "content-type": "text/html" },
+        });
+      }
+      return new Response("Not Found", { status: 404 });
+    }) as typeof fetch;
+
+    const response = await handler.fetch(new Request("https://example.com/api/legacies"));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.source).toBe("archive");
+    expect(payload.meta.mappedItems).toBe(1);
+    expect(payload.records).toHaveLength(1);
+    expect(payload.records[0]).toMatchObject({
+      id: 12,
+      title: "Painted portrait of William Porcher DuBose.",
+      lat: 35.2049921,
+      lng: -85.9200333,
+      label: "Sewanee, Tennessee",
+      image: "https://locatinglegacies.org/files/medium/sample.jpg",
+      itemUrl: "https://web.archive.org/web/20260411001947/https://locatinglegacies.org/s/hub/item/12",
+    });
+  });
 });
