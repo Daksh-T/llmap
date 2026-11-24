@@ -85,7 +85,8 @@ const el = {
   catalogSearch: $("catalog-search"), catalogClose: $("catalog-close"),
   catalogCount: $("catalog-count"),
   // Resize
-  dossier: $("dossier"), dossierHandle: $("dossier-handle"),
+  dossier: $("dossier"), dossierScroll: document.querySelector(".dossier-scroll"),
+  dossierHandle: $("dossier-handle"),
   dossierClose: $("dossier-close"),
 };
 
@@ -403,6 +404,8 @@ function getSelectionZoom(rec) {
 const DESC_LIMIT = 380;
 
 function renderFeature(rec) {
+  if (el.dossierScroll) el.dossierScroll.scrollTop = 0;
+
   if (!rec) {
     el.featureCard.innerHTML = `
       <div class="record-empty">
